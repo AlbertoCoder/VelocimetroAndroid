@@ -1,8 +1,15 @@
+import java.util.Base64
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
+
+val releaseKeystoreBase64: String? = System.getenv("RELEASE_KEYSTORE_BASE64")
+val releaseKeystorePassword: String? = System.getenv("RELEASE_KEYSTORE_PASSWORD")
+val releaseKeyAlias: String? = System.getenv("RELEASE_KEY_ALIAS")
+val releaseKeyPassword: String? = System.getenv("RELEASE_KEY_PASSWORD")
 
 android {
     namespace = "com.velocimetro.android"
@@ -21,6 +28,20 @@ android {
         }
     }
 
+    signingConfigs {
+        if (releaseKeystoreBase64 != null) {
+            create("release") {
+                val keystoreFile = File(layout.buildDirectory.asFile.get(), "release.keystore")
+                keystoreFile.parentFile?.mkdirs()
+                keystoreFile.writeBytes(Base64.getDecoder().decode(releaseKeystoreBase64))
+                storeFile = keystoreFile
+                storePassword = releaseKeystorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -28,6 +49,8 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.findByName("release")
+                ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {
