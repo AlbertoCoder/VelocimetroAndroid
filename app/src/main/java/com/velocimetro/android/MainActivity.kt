@@ -13,6 +13,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -44,10 +45,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -331,59 +334,47 @@ fun AutoResizeText(
     maxFontSize: TextUnit = 300.sp
 ) {
     val fontFamily = FontFamily.Monospace
+    val textMeasurer = rememberTextMeasurer()
 
-    SubcomposeLayout(modifier = modifier) { constraints ->
-        var fontSize = maxFontSize
-        var readyToDraw = false
+    BoxWithConstraints(
+        modifier = modifier,
+        contentAlignment = Alignment.Center
+    ) {
+        val density = LocalDensity.current
+        val maxWidthPx = with(density) { maxWidth.toPx() }
+        val maxHeightPx = with(density) { maxHeight.toPx() }
 
-        while (!readyToDraw) {
-            val textStyle = androidx.compose.ui.text.TextStyle(
+        val fontSize = remember(text, maxWidthPx, maxHeightPx, maxFontSize) {
+            var size = maxFontSize
+            while (size.value > 1f) {
+                val measured = textMeasurer.measure(
+                    text = AnnotatedString(text),
+                    style = TextStyle(
+                        fontSize = size,
+                        fontFamily = fontFamily,
+                        textAlign = TextAlign.Center
+                    ),
+                    maxLines = 1,
+                    softWrap = false
+                )
+                if (measured.size.width <= maxWidthPx && measured.size.height <= maxHeightPx) {
+                    break
+                }
+                size *= 0.9f
+            }
+            size
+        }
+
+        Text(
+            text = text,
+            style = TextStyle(
                 fontSize = fontSize,
                 fontFamily = fontFamily,
                 color = color,
                 textAlign = TextAlign.Center
-            )
-            val textMeasurable = subcompose("text") {
-                Text(
-                    text = text,
-                    style = textStyle,
-                    maxLines = 1
-                )
-            }.first()
-            val textSize = textMeasurable.measure(Constraints(maxWidth = Int.MAX_VALUE))
-
-            if (textSize.width <= constraints.maxWidth && textSize.height <= constraints.maxHeight || fontSize.value <= 1f) {
-                readyToDraw = true
-            } else {
-                fontSize = fontSize * 0.9f
-            }
-        }
-
-        val finalTextStyle = androidx.compose.ui.text.TextStyle(
-            fontSize = fontSize,
-            fontFamily = fontFamily,
-            color = color,
-            textAlign = TextAlign.Center
+            ),
+            maxLines = 1,
+            softWrap = false
         )
-        val finalMeasurable = subcompose("finalText") {
-            Text(
-                text = text,
-                style = finalTextStyle,
-                maxLines = 1,
-                modifier = Modifier.fillMaxSize()
-            )
-        }.first()
-        val finalSize = finalMeasurable.measure(
-            Constraints(
-                minWidth = constraints.minWidth,
-                maxWidth = constraints.maxWidth,
-                minHeight = constraints.minHeight,
-                maxHeight = constraints.maxHeight
-            )
-        )
-
-        layout(finalSize.width, finalSize.height) {
-            finalSize.placeRelative(0, 0)
-        }
     }
 }
