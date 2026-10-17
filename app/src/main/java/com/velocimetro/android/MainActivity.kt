@@ -3,7 +3,6 @@ package com.velocimetro.android
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
-import android.location.Location
 import android.os.Bundle
 import android.os.Looper
 import android.view.WindowManager
@@ -46,8 +45,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.SubcomposeLayout
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
@@ -67,12 +64,13 @@ import kotlin.math.roundToInt
 class MainActivity : ComponentActivity() {
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private var locationCallback: LocationCallback? = null
+    private var speedListener: ((Float) -> Unit)? = null
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
-                permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+            permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (granted) {
             startLocationUpdates()
         }
@@ -92,10 +90,7 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     VelocimetroScreen(
-                        onRequestPermissions = { requestLocationPermissions() },
-                        onStartUpdates = { startLocationUpdates() },
-                        fusedLocationClientProvider = { fusedLocationClient },
-                        setLocationCallback = { callback -> locationCallback = callback }
+                        onRegisterSpeedListener = { listener -> speedListener = listener }
                     )
                 }
             }
@@ -104,28 +99,33 @@ class MainActivity : ComponentActivity() {
         requestLocationPermissions()
     }
 
+    private fun hasLocationPermission(): Boolean {
+        return ActivityCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED || ActivityCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
     private fun requestLocationPermissions() {
-        if (ActivityCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
+        if (hasLocationPermission()) {
+            startLocationUpdates()
+        } else {
             requestPermissionLauncher.launch(
                 arrayOf(
                     Manifest.permission.ACCESS_FINE_LOCATION,
                     Manifest.permission.ACCESS_COARSE_LOCATION
                 )
             )
-        } else {
-            startLocationUpdates()
         }
     }
 
     @SuppressLint("MissingPermission")
     private fun startLocationUpdates() {
+        if (locationCallback != null) return
+
         val locationRequest = LocationRequest.Builder(
             Priority.PRIORITY_HIGH_ACCURACY,
             500L
@@ -134,7 +134,9 @@ class MainActivity : ComponentActivity() {
         val callback = object : LocationCallback() {
             override fun onLocationResult(locationResult: LocationResult) {
                 super.onLocationResult(locationResult)
-                // Location updates handled in composable via callback
+                val location = locationResult.lastLocation ?: return
+                val speed = if (location.hasSpeed()) location.speed * 3.6f else 0f
+                speedListener?.invoke(speed)
             }
         }
         locationCallback = callback
@@ -145,23 +147,19 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    private fun stopLocationUpdates() {
+        locationCallback?.let { fusedLocationClient.removeLocationUpdates(it) }
+        locationCallback = null
+    }
+
     override fun onPause() {
         super.onPause()
-        locationCallback?.let {
-            fusedLocationClient.removeLocationUpdates(it)
-        }
+        stopLocationUpdates()
     }
 
     override fun onResume() {
         super.onResume()
-        if (ActivityCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED || ActivityCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-        ) {
+        if (hasLocationPermission()) {
             startLocationUpdates()
         }
     }
@@ -169,34 +167,15 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun VelocimetroScreen(
-    onRequestPermissions: () -> Unit,
-    onStartUpdates: () -> Unit,
-    fusedLocationClientProvider: () -> FusedLocationProviderClient,
-    setLocationCallback: (LocationCallback) -> Unit
+    onRegisterSpeedListener: ((Float) -> Unit) -> Unit
 ) {
-    val context = LocalContext.current
     var speedKmh by remember { mutableFloatStateOf(0f) }
     var unit by remember { mutableIntStateOf(0) } // 0 = km/h, 1 = mph
     var showColorPicker by remember { mutableStateOf(false) }
     var displayColor by remember { mutableStateOf(Color.Red) }
 
-    val fusedLocationClient = fusedLocationClientProvider()
-
     LaunchedEffect(Unit) {
-        val callback = object : LocationCallback() {
-            override fun onLocationResult(locationResult: LocationResult) {
-                super.onLocationResult(locationResult)
-                val lastLocation: Location? = locationResult.lastLocation
-                lastLocation?.let {
-                    if (it.hasSpeed()) {
-                        speedKmh = it.speed * 3.6f
-                    } else {
-                        speedKmh = 0f
-                    }
-                }
-            }
-        }
-        setLocationCallback(callback)
+        onRegisterSpeedListener { speed -> speedKmh = speed }
     }
 
     if (showColorPicker) {
@@ -340,7 +319,7 @@ fun AutoResizeText(
     modifier: Modifier = Modifier,
     maxFontSize: TextUnit = 300.sp
 ) {
-    val digitalFontFamily = FontFamily(Font(R.font.dseg7_bold))
+    val fontFamily = FontFamily.Monospace
 
     SubcomposeLayout(modifier = modifier) { constraints ->
         var fontSize = maxFontSize
@@ -349,7 +328,7 @@ fun AutoResizeText(
         while (!readyToDraw) {
             val textStyle = androidx.compose.ui.text.TextStyle(
                 fontSize = fontSize,
-                fontFamily = digitalFontFamily,
+                fontFamily = fontFamily,
                 color = color,
                 textAlign = TextAlign.Center
             )
@@ -371,7 +350,7 @@ fun AutoResizeText(
 
         val finalTextStyle = androidx.compose.ui.text.TextStyle(
             fontSize = fontSize,
-            fontFamily = digitalFontFamily,
+            fontFamily = fontFamily,
             color = color,
             textAlign = TextAlign.Center
         )
