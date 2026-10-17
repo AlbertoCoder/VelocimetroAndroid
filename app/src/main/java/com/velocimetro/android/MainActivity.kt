@@ -125,6 +125,7 @@ class MainActivity : ComponentActivity() {
     @SuppressLint("MissingPermission")
     private fun startLocationUpdates() {
         if (locationCallback != null) return
+        if (!hasLocationPermission()) return
 
         val locationRequest = LocationRequest.Builder(
             Priority.PRIORITY_HIGH_ACCURACY,
@@ -140,15 +141,25 @@ class MainActivity : ComponentActivity() {
             }
         }
         locationCallback = callback
-        fusedLocationClient.requestLocationUpdates(
-            locationRequest,
-            callback,
-            Looper.getMainLooper()
-        )
+        try {
+            fusedLocationClient.requestLocationUpdates(
+                locationRequest,
+                callback,
+                Looper.getMainLooper()
+            )
+        } catch (e: SecurityException) {
+            locationCallback = null
+        }
     }
 
     private fun stopLocationUpdates() {
-        locationCallback?.let { fusedLocationClient.removeLocationUpdates(it) }
+        locationCallback?.let {
+            try {
+                fusedLocationClient.removeLocationUpdates(it)
+            } catch (e: SecurityException) {
+                // Ignorar si el permiso ya no está disponible.
+            }
+        }
         locationCallback = null
     }
 
